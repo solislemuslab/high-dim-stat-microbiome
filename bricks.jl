@@ -1,5 +1,7 @@
 module HighDimMM
 
+using Base: Float64
+using DataFrames: Dict
 using LinearAlgebra: AbstractMatrix
 using StatsModels
 using LinearAlgebra
@@ -93,15 +95,22 @@ end
 abstract type AbstractReMat{T} <: AbstractMatrix{T} end
 
 mutable struct ReMat{T,S} <: AbstractReMat{T}
-    trm # the grouping factor as a `StatsModels.CategoricalTerm`
+    #trm # the grouping factor as a `StatsModels.CategoricalTerm`   ##????
     Z::Matrix{T}
 end
+
+# constructor for XMat X,
+function ReMat(Z::AbstractMatrix{T}) where {T}
+    ReMat{T, typeof(Z)}(Z)
+end
+
+
 
 LinearAlgebra.rank(A::ReMat) = rank(A.Z)
 
 isfullrank(A::ReMat) = rank(A) == size(A.Z,2)
 
-Base.getindex(A::ReMat, i::Int, j::Int) = getindex(A.X, i, j)
+Base.getindex(A::ReMat, i::Int, j::Int) = getindex(A.Z, i, j)
 
 Base.size(A::ReMat) = size(A.Z)
 
@@ -132,14 +141,50 @@ struct highDimMixedModel{T<:AbstractFloat}
     X::XMat{T}
     Z::ReMat{T}
     y::Vector{T}
-    optsum::OptSummary{T}
+    #optsum::OptSummary{T}
 end
 
+
 function highDimMixedModel(
-    f::FormulaTerm
-    df::DataFrame
+    f::FormulaTerm,
+    df::DataFrame,
+    contrasts::Dict{Symbol, UnionAll},
+    numOfHDM::Int64,
+    numOfXMat::Int64
+) where{T}
+    sch = schema(df,contrasts)
+    form = apply_schema(f, sch)
+    y, pred = modelcols(form, df);
+    MXZ = pred[:,2:size(pred,2)]  ## get rid of intercept
+    M = highDimMat(MXZ[:,1:numOfHDM])
+    intercept = pred[:,1]
+    X = XMat(hcat(reshape(intercept, size(intercept,1),1), MXZ[:, (numOfHDM + 1):(numOfHDM + numOfXMat)]))  ## concatenate intercept with X
+    Z = ReMat(MXZ[:, (numOfHDM + numOfXMat + 1):size(MXZ,2)])
     
+    #return highDimMixedModel{T<:AbstractFloat}(form, M, X, Z, y)
+    return highDimMixedModel{Float64}(form, M, X, Z, y)
+end
+
+
+##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
+# fit
+##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
+function fit(
+    ::Type{LinearMixedModel},
+    f::FormulaTerm,
+    tbl::Tables.ColumnTable;
+    wts=wts,
+    contrasts=contrasts,
+    progress=progress,
+    REML=REML,
 )
+    return fit!(
+        LinearMixedModel(f, tbl; contrasts=contrasts, wts=wts); progress=progress, REML=REML
+    )
+end
+
+
+
 
 
 
