@@ -1,12 +1,3 @@
-module HighDimMM
-
-using Base: Float64
-using DataFrames: Dict
-using LinearAlgebra: AbstractMatrix
-using StatsModels
-using LinearAlgebra
-using DataFrames
-
 ##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
 # M
 ##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
@@ -80,11 +71,12 @@ Base.size(A::XMat{T}) where {T} = size(A.X)
 Base.size(A::XMat{T}, i::Integer) where {T} = size(A.X, i)
 
 ## define new infix binary operator?
-"""
-function *(A::highDimMat{T}, B::XMat{T}) where{T}
+
+function Base.:*(A::highDimMat{T}, B::XMat{T}) where{T}
     A.M*B.X
 end
-"""
+
+
 #*(A::highDimMat{T, AbstractMatrix{T}}, B::XMat{T, AbstractMatrix{T}}) where{T} = A.M*B.X
 
 *(A::highDimMat{Int64, Matrix{Int64}}, B::XMat{Int64, Matrix{Int64}}) where{T} = A.M*B.X
@@ -135,7 +127,7 @@ High dim mixed-effects model representation
 * `X`: the fixed-effects model matrix
 * `y`: the response vector
 """
-struct highDimMixedModel{T<:AbstractFloat} 
+struct highDimMixedModel{T<:AbstractFloat}  <: MixedModel{T}
     formula::FormulaTerm
     M::highDimMat{T}
     X::XMat{T}
@@ -169,8 +161,9 @@ end
 ##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
 # fit
 ##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
+
 function fit(
-    ::Type{LinearMixedModel},
+    ::Type{highDimMixedModel},
     f::FormulaTerm,
     tbl::Tables.ColumnTable;
     wts=wts,
@@ -179,21 +172,8 @@ function fit(
     REML=REML,
 )
     return fit!(
-        LinearMixedModel(f, tbl; contrasts=contrasts, wts=wts); progress=progress, REML=REML
+        highDimMixedModel(f, tbl; contrasts=contrasts, wts=wts); progress=progress, REML=REML
     )
-end
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
