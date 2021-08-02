@@ -1,11 +1,15 @@
 module HighDimMM
 
-using Base: Float64
+#using MixedModels: modelmatrix
+using MixedModels: modelmatrix
+using Base: Float64, AbstractVecOrTuple
 using DataFrames: Dict
 #using LinearAlgebra: AbstractMatrix, include
 using StatsModels
 using LinearAlgebra
 using DataFrames
+using MixedModels
+using NLopt
 
 import Base: *
 
@@ -13,7 +17,7 @@ abstract type MixedModel{T} <: StatsModels.RegressionModel end # model with fixe
 
 include("bricks.jl")
 
-export highDimMixedModel
+export highDimMixedModel, modelmatrix
 
 
 end

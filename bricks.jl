@@ -1,7 +1,6 @@
 ##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
 # M
 ##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
-
 mutable struct highDimMat{T, S<:AbstractMatrix}
     M::S
 end 
@@ -137,6 +136,10 @@ struct highDimMixedModel{T<:AbstractFloat}  <: MixedModel{T}
 end
 
 
+"""
+    highDimMixedModel
+dealing with the number of columns in M and X scenario, assume intercept alwalys exists (@formula: y ~ 1 + ... )
+"""
 function highDimMixedModel(
     f::FormulaTerm,
     df::DataFrame,
@@ -157,6 +160,38 @@ function highDimMixedModel(
     return highDimMixedModel{Float64}(form, M, X, Z, y)
 end
 
+""" not useful right now
+private help function for select indices for remaining random effect matrix
+    preTerms is Vector(1:length(form.rhs.terms))
+
+_filt(x, preTerms) = !(x in preTerms)
+
+preTerms = Vector(1:length(form.rhs.terms))
+
+"""
+
+function highDimMixedModel(
+    f::FormulaTerm,
+    df::DataFrame,
+    contrasts::Dict{Symbol, UnionAll},
+    idOfHDM::Union{Int,AbstractArray{Int64,1}}, # [1,2]
+    idOfXMat::Union{Int,AbstractArray{Int64,1}},
+    idOfReMat::Union{Int,AbstractArray{Int64,1}}
+) where {T} 
+    sch = schema(df, contrasts)
+    form = apply_schema(f, sch)
+    y, pred = modelcols(form, df);
+    terms = form.rhs.terms
+    M = highDimMat(StatsModels.modelmatrix(terms[idOfHDM]))
+    X = XMat(modelmatrix(terms[idOfXMat]))
+
+    #preTerms = Vector(1:length(form.rhs.terms))
+    #idOfReMat = preTerms[preTerms .∉ Ref(vcat(idOfHDM, idOfXmat))]
+    Z = ReMat(modelmatrix(terms[idOfReMat]))
+
+    return highDimMixedModel{Float64}(form, M, X, Z, y)
+
+end
 
 ##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
 # fit
@@ -165,27 +200,45 @@ end
 function fit(
     ::Type{highDimMixedModel},
     f::FormulaTerm,
-    tbl::Tables.ColumnTable;
-    wts=wts,
-    contrasts=contrasts,
-    progress=progress,
-    REML=REML,
-)
-    return fit!(
-        highDimMixedModel(f, tbl; contrasts=contrasts, wts=wts); progress=progress, REML=REML
-    )
+    df::DataFrame;
+    contrasts,
+    progress,
+    REML,
+    idOfHDM::Union{Int,AbstractArray{Int64,1}}, # [1,2]
+    idOfXMat::Union{Int,AbstractArray{Int64,1}},
+    idOfReMat::Union{Int,AbstractArray{Int64,1}}
+) return fit!(highDimMixedModel(f, df, contrasts, idOfHDM, idOfXMat, idOfReMat), progress, REML)
+    
+function fit(
+    HMM::::Type{highDimMixedModel},
+    progress,
+    REML
+) return fit!(HMM, progress, REML)
 
+"""
+private help function: objective
+"""
 
+function negLogLik(sigma::Vector, grad::Vector, K::AbstractMatrix, Z::AbstractMatrix, y::Vector)
+    n = length(y)
+    Sigma = sigma[1]*Z*transpose(Z) + sigma[2]*diagm(ones(n))
+    negLog = -1/2*log(det(K*Sigma*K)) - 1/2*transpose(y)*transopse(K)*inv(K*Sigma*K)*K*y
+    return negLog
+end
 
+function fit!(HMM::LinearMixedModel{T}; progress::Bool=true, REML::Bool=false) where {T}
+    A = hcat(HMM.M.M, HMM.X.X)
+    P = I - A*inv(transpose(A)*A)*transpose(A)
+    u,s,v = svd(P)
+    r = size(HMM.M,2) + size(HMM.X,2)  # simplify: assume fixed effect full rank
+    C = transpose(u[:,1:r]) 
+    K = C*P
+    
+    opt = Opt(:LN_COBYLA, 2)
+    opt.min_objective = negLogLik
+    opt.xtol_rel = 1e-5
 
-
-
-
-
-
-
-
-
+    (optf,optx,ret) = optimize(opt, [1,1])
 
 
 end
