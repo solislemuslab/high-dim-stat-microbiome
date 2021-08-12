@@ -1,7 +1,6 @@
 module HighDimMM
 
 #using MixedModels: modelmatrix
-using MixedModels: modelmatrix
 using Base: Float64, AbstractVecOrTuple
 using DataFrames: Dict
 #using LinearAlgebra: AbstractMatrix, include
