@@ -279,13 +279,13 @@ function fit(
 end
 
 
-function fit!(HMM::highDimMixedModel{T}; verbose::Bool=true, REML::Bool=true) where {T}
-    n = size(HMM.M, 2)
+function fit!(HMM::highDimMixedModel{T}; verbose::Bool=true, REML::Bool=true, alg = :LN_COBYLA) where {T}
+    n = size(HMM.M, 1)
     A = hcat(HMM.M.M, HMM.X.X)
     P = I - A*inv(transpose(A)*A)*transpose(A)
     u,s,v = svd(P)
     r = size(HMM.M,2) + size(HMM.X,2)  # simplify: assume fixed effect full rank
-    C = transpose(u[:,1:r]) 
+    C = transpose(u[:,1:(n-r)]) 
     K = C*P
     Z = HMM.Z.Z
     y = HMM.y
@@ -294,11 +294,11 @@ function fit!(HMM::highDimMixedModel{T}; verbose::Bool=true, REML::Bool=true) wh
     function negLogLik(sigma::Vector{Float64}, g::Vector{Float64})
         n = length(y)
         Sigma = sigma[1]*Z*transpose(Z) + sigma[2]*diagm(ones(n))
-        negLog = -1/2*log(det(K*Sigma*K)) - 1/2*transpose(y)*transopse(K)*inv(K*Sigma*K)*K*y
+        negLog = -1/2*log(det(K*Sigma*transpose(K))) - 1/2*transpose(y)*transpose(K)*inv(K*Sigma*transpose(K))*K*y
         return negLog
     end
 
-    opt = Opt(:LN_BOBYQA, 2) # :GN_DIRECT_L  :LN_COBYLA :LN_BOBYQA
+    opt = Opt(alg, 2) # :GN_DIRECT_L  :LN_COBYLA :LN_BOBYQA
     opt.min_objective = negLogLik
     opt.xtol_rel = 1e-5
 
@@ -317,4 +317,5 @@ function fit!(HMM::highDimMixedModel{T}; verbose::Bool=true, REML::Bool=true) wh
     return optx, beta
 
 end
+
 
