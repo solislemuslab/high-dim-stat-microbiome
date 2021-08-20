@@ -15,6 +15,8 @@ import Base: *
 abstract type MixedModel{T} <: StatsModels.RegressionModel end # model with fixed and random effects
 
 include("bricks.jl")
+#include("bricks_Number.jl")
+
 
 export highDimMixedModel, modelmatrix
 

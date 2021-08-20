@@ -126,7 +126,7 @@ High dim mixed-effects model representation
 * `X`: the fixed-effects model matrix
 * `y`: the response vector
 """
-struct highDimMixedModel{T<:AbstractFloat}  <: MixedModel{T}
+struct highDimMixedModel{T<:Number}  <: MixedModel{T}
     formula::FormulaTerm
     M::highDimMat{T}
     X::XMat{T}
@@ -157,15 +157,8 @@ function highDimMixedModel(
     Z = ReMat(MXZ[:, (numOfHDM + numOfXMat + 1):size(MXZ,2)])
     
     #return highDimMixedModel{T<:AbstractFloat}(form, M, X, Z, y)
-    return highDimMixedModel{Float64}(form, M, X, Z, y)
+    return highDimMixedModel{<:Number}(form, M, X, Z, y)
 end
-
-
-"""
-    highDimMixedModel(...)
-   Private constructor for a highDimMixedModel.
-To construct a model, you only need the formula (`f`), data(`df`), contrasts and indices of M,X,Z
-"""
 
 """ not useful right now
 private help function for select indices for remaining random effect matrix
@@ -185,11 +178,13 @@ function highDimMixedModel(
     idOfXMat::Union{Int,AbstractArray{Int64,1}},
     idOfReMat::Union{Int,AbstractArray{Int64,1}}
 ) where {T} 
+    """
     for i in 1:size(df,2)
         if(eltype(df[:,i]) == Int64)
             df[!,i] = convert(Vector{Float64},df[:,i])
         end
     end
+    """
     sch = schema(df, contrasts)
     form = apply_schema(f, sch)
     y, pred = modelcols(form, df);
@@ -201,59 +196,7 @@ function highDimMixedModel(
     #idOfReMat = preTerms[preTerms .∉ Ref(vcat(idOfHDM, idOfXmat))]
     Z = ReMat(modelmatrix(terms[idOfReMat],df))
 
-    return highDimMixedModel{Float64}(form, M, X, Z, y)
-
-end
-
-"""
-    highDimMixedModel(...)
-   Private constructor for a highDimMixedModel.
-To construct a model, you only need the formula (`f`), data(`df`), contrasts and names of columns of M,X,Z
-"""
-function highDimMixedModel(
-    f::FormulaTerm,
-    df::DataFrame,
-    contrasts::Dict{Symbol, UnionAll},
-    nameOfHDM::Union{AbstractString,AbstractArray{<:AbstractString,1}}, # ["a","b"]
-    nameOfXMat::Union{AbstractString,AbstractArray{<:AbstractString,1}},
-    nameOfReMat::Union{AbstractString,AbstractArray{<:AbstractString,1}}
-) where {T} 
-    """
-    for i in 1:size(df,2)
-        if(eltype(df[:,i]) == Int64)
-            df[!,i] = convert(Vector{Float64},df[:,i])
-        end
-    end
-    """
-    for i in 1:size(df,2)
-        if(isa(df[1,i], Number))
-            df[!,i] = convert(Vector{Float64},df[:,i])
-        end
-    end
-    sch = schema(df, contrasts)
-    form = apply_schema(f, sch)
-    y, pred = modelcols(form, df);
-    terms = form.rhs.terms
-
-    ## get id by names
-    namesOfVar = names(df)[2:length(names(df))] ## extract variable names
-    if typeof(nameOfHDM) == String idOfHDM = findall(x -> x == nameOfHDM, namesOfVar)
-    else idOfHDM = findall(x -> x in nameOfHDM, namesOfVar) ; end
-
-    if typeof(nameOfXMat) == String idOfXMat = findall(x -> x == nameOfXMat, namesOfVar)
-    else idOfXMat = findall(x -> x in nameOfXMat, namesOfVar) ; end
-    
-    if typeof(nameOfReMat) == String idOfReMat = findall(x -> x == nameOfReMat, namesOfVar)
-    else idOfReMat = findall(x -> x in nameOfReMat, namesOfVar) ; end
-    
-    M = highDimMat(modelmatrix(terms[idOfHDM],df))
-    X = XMat(modelmatrix(terms[idOfXMat],df))
-
-    #preTerms = Vector(1:length(form.rhs.terms))
-    #idOfReMat = preTerms[preTerms .∉ Ref(vcat(idOfHDM, idOfXmat))]
-    Z = ReMat(modelmatrix(terms[idOfReMat],df))
-
-    return highDimMixedModel{Float64}(form, M, X, Z, y)
+    return highDimMixedModel{<:Number}(form, M, X, Z, y)
 
 end
 
@@ -274,56 +217,39 @@ function fit(
 ) return fit!(highDimMixedModel(f, df, contrasts, idOfHDM, idOfXMat, idOfReMat), progress, REML)
 end
     
-
+function fit(
+    HMM::Type{highDimMixedModel},
+    progress,
+    REML
+) return fit!(HMM, progress, REML)
+end
 """
 
 
-function fit(
-    ::Type{highDimMixedModel};
-    verbose::Bool=true,
-    REML::Bool=true,
-) return fit!(HMM, verbose = verbose, REML = REML)
+"""
+private help function: objective
+"""
+
+function negLogLik(sigma::Vector, grad::Vector, K::AbstractVecOrMat, Z::AbstractMatrix, y::Vector)
+    n = length(y)
+    Sigma = sigma[1]*Z*transpose(Z) + sigma[2]*diagm(ones(n))
+    negLog = -1/2*log(det(K*Sigma*K)) - 1/2*transpose(y)*transopse(K)*inv(K*Sigma*K)*K*y
+    return negLog
 end
 
-
-function fit!(HMM::highDimMixedModel{T}; verbose::Bool=true, REML::Bool=true, alg = :LN_COBYLA) where {T}
-    n = size(HMM.M, 1)
+function fit!(HMM::LinearMixedModel{T}; progress::Bool=true, REML::Bool=false) where {T}
     A = hcat(HMM.M.M, HMM.X.X)
     P = I - A*inv(transpose(A)*A)*transpose(A)
     u,s,v = svd(P)
     r = size(HMM.M,2) + size(HMM.X,2)  # simplify: assume fixed effect full rank
-    #C = randn((n-r),n)
-    C = transpose(u[:,1:(n-r)]) 
+    C = transpose(u[:,1:r]) 
     K = C*P
-    Z = HMM.Z.Z
-    y = HMM.y
-    # C can be any full rank matrix with size n,r, e.g. randn(n,r)
     
-    function negLogLik(sigma::Vector{Float64}, g::Vector{Float64})
-        n = length(y)
-        Sigma = sigma[1]*Z*transpose(Z) + sigma[2]*diagm(ones(n))
-        negLog = -1/2*log(det(K*Sigma*transpose(K))) - 1/2*transpose(y)*transpose(K)*inv(K*Sigma*transpose(K))*K*y
-        return negLog
-    end
-
-    opt = Opt(alg, 2) # :GN_DIRECT_L  :LN_COBYLA :LN_BOBYQA
+    opt = Opt(:LN_COBYLA, 2)
     opt.min_objective = negLogLik
     opt.xtol_rel = 1e-5
 
-    sigma = [2,2]
-    if verbose println("OPTBL: starting point $(sigma)") ; end    # to stdout
+    (optf,optx,ret) = optimize(opt, [1,1])
 
-    (optf,optx,ret) = optimize(opt, sigma)
-
-    numevals = opt.numevals
-
-    if verbose println("got $(round(optf, digits=5)) at $(round.(optx, digits=5)) after $numevals iterations (returned $(ret))") ; end
-
-    Sigma = optx[1]*Z*transpose(Z) + optx[2]*diagm(ones(n))
-    beta = inv(transpose(A)*inv(Sigma)*A)*transpose(A)*inv(Sigma)*y
-
-    return optx, beta
 
 end
-
-
