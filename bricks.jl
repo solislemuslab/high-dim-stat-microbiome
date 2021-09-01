@@ -279,10 +279,12 @@ end
 
 
 function fit(
-    ::Type{highDimMixedModel};
+    HMM::highDimMixedModel{T};
     verbose::Bool=true,
     REML::Bool=true,
-) return fit!(HMM, verbose = verbose, REML = REML)
+    alg = :LN_COBYLA,
+) where{T}
+    return fit!(HMM, verbose = verbose, REML = REML, alg = alg)
 end
 
 

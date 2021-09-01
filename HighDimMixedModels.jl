@@ -18,7 +18,7 @@ include("bricks.jl")
 #include("bricks_Number.jl")
 
 
-export highDimMixedModel, modelmatrix
+export highDimMixedModel, modelmatrix, fit
 
 
 end
