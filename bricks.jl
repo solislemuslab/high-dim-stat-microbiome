@@ -126,13 +126,13 @@ High dim mixed-effects model representation
 * `X`: the fixed-effects model matrix
 * `y`: the response vector
 """
-struct highDimMixedModel{T<:AbstractFloat}  <: MixedModel{T}
+mutable struct highDimMixedModel{T<:AbstractFloat}  <: MixedModel{T}
     formula::FormulaTerm
     M::highDimMat{T}
     X::XMat{T}
     Z::ReMat{T}
     y::Vector{T}
-    #optsum::OptSummary{T}
+    optsum::Union{OptSummary{T}, Nothing}
 end
 
 
@@ -157,7 +157,7 @@ function highDimMixedModel(
     Z = ReMat(MXZ[:, (numOfHDM + numOfXMat + 1):size(MXZ,2)])
     
     #return highDimMixedModel{T<:AbstractFloat}(form, M, X, Z, y)
-    return highDimMixedModel{Float64}(form, M, X, Z, y)
+    return highDimMixedModel{Float64}(form, M, X, Z, y, nothing)
 end
 
 
@@ -201,7 +201,7 @@ function highDimMixedModel(
     #idOfReMat = preTerms[preTerms .∉ Ref(vcat(idOfHDM, idOfXmat))]
     Z = ReMat(modelmatrix(terms[idOfReMat],df))
 
-    return highDimMixedModel{Float64}(form, M, X, Z, y)
+    return highDimMixedModel{Float64}(form, M, X, Z, y, nothing)
 
 end
 
@@ -253,7 +253,7 @@ function highDimMixedModel(
     #idOfReMat = preTerms[preTerms .∉ Ref(vcat(idOfHDM, idOfXmat))]
     Z = ReMat(modelmatrix(terms[idOfReMat],df))
 
-    return highDimMixedModel{Float64}(form, M, X, Z, y)
+    return highDimMixedModel{Float64}(form, M, X, Z, y, nothing)
 
 end
 
@@ -298,32 +298,136 @@ function fit!(HMM::highDimMixedModel{T}; verbose::Bool=true, REML::Bool=true, al
     Z = HMM.Z.Z
     y = HMM.y
     # C can be any full rank matrix with size n,r, e.g. randn(n,r)
+
+    ## add optsum
+    # init para
+    sigma = [2,2]
+    lbd = [0.0; 0.0]
+    optsum = OptSummary(Float64.(sigma), lbd, alg; ftol_rel=T(1.0e-12), ftol_abs=T(1.0e-8), xtol_rel = 1e-5)
+    optsum.REML = true
     
+    ## init opt based on optsum
+    opt = Opt(optsum)
+
     function negLogLik(sigma::Vector{Float64}, g::Vector{Float64})
         n = length(y)
         Sigma = sigma[1]*Z*transpose(Z) + sigma[2]*diagm(ones(n))
         negLog = -1/2*log(det(K*Sigma*transpose(K))) - 1/2*transpose(y)*transpose(K)*inv(K*Sigma*transpose(K))*K*y
+        #println("OPT: parameter $(sigma) || objective eval $(negLog)")
+        #@show sigma
+        #@show negLog
+
         return negLog
     end
 
-    opt = Opt(alg, 2) # :GN_DIRECT_L  :LN_COBYLA :LN_BOBYQA
-    opt.min_objective = negLogLik
-    opt.xtol_rel = 1e-5
+    println("The initial object value is $(negLogLik(Float64.(sigma), [1.0,1.0]))")
 
-    sigma = [2,2]
+    opt.min_objective = negLogLik
+    optsum.finitial = negLogLik(optsum.initial, [1.0,1.0])  # the second field not useful right now
+
+    
+
     if verbose println("OPTBL: starting point $(sigma)") ; end    # to stdout
 
     (optf,optx,ret) = optimize(opt, sigma)
-
-    numevals = opt.numevals
-
-    if verbose println("got $(round(optf, digits=5)) at $(round.(optx, digits=5)) after $numevals iterations (returned $(ret))") ; end
+    
 
     Sigma = optx[1]*Z*transpose(Z) + optx[2]*diagm(ones(n))
     beta = inv(transpose(A)*inv(Sigma)*A)*transpose(A)*inv(Sigma)*y
+    betaM = beta[1:size(HMM.M,2)]
+    betaX = beta[(size(HMM.M,2) + 1): size(beta)[1]]
 
-    return optx, beta
+    optsum.feval = opt.numevals
+    optsum.final = optx
+    optsum.fmin = optf
+    optsum.returnvalue = ret
+
+    if verbose println("got $(round(optf, digits=5)) at $(round.(optx, digits=5)) after $(opt.numevals) iterations (returned $(ret))") ; end
+
+    HMM.optsum = optsum
+
+    return optx, betaM, betaX, optsum
 
 end
+
+
+##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
+# Base.getproperty
+##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
+
+function Base.getproperty(HMM::highDimMixedModel{T}, s::Symbol) where{T}
+    if s == :σ || s == :sigma
+        getσ(HMM)
+    elseif s == :β || s ==:beta
+        getβ(HMM)
+    elseif s == :βM || s == :betaM
+        getβM(HMM)
+    elseif s == :βX || s == :betaX
+        getβX(HMM)
+    else
+        getfield(HMM,s)
+    end
+end
+
+function getσ(HMM::highDimMixedModel{T}) where{T}
+    return HMM.optsum.final
+end
+
+function getβ(HMM::highDimMixedModel{T}) where{T}
+    n = size(HMM.M, 1)
+    A = hcat(HMM.M.M, HMM.X.X)
+    Z = HMM.Z.Z
+    y = HMM.y
+    optx = HMM.sigma
+    Sigma = optx[1]*Z*transpose(Z) + optx[2]*diagm(ones(n))
+    beta = inv(transpose(A)*inv(Sigma)*A)*transpose(A)*inv(Sigma)*y
+    return beta
+end
+
+function getβM(HMM::highDimMixedModel{T}) where{T}
+    beta = getβ(HMM)[1:size(HMM.M,2)]
+    return beta[1:size(HMM.M,2)]
+end
+
+function getβX(HMM::highDimMixedModel{T}) where{T}
+    beta = getβ(HMM)[1:size(HMM.M,2)]
+    return beta[(size(HMM.M,2) + 1): size(beta)[1]]
+end
+
+##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
+# Base.show
+##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============##==============
+
+function Base.show(io::IO, ::MIME"text/plain", HMM::highDimMixedModel)
+    if isnothing(HMM.optsum)
+        return
+    end
+    REML = HMM.optsum.REML
+    println(io, "Linear mixed model fit by ", REML ? "REML" : "not implemented yet")
+    println(io, " ", HMM.formula)
+    obj = HMM.optsum.fmin
+    if REML
+        println(io, " REML criterion at convergence: ", obj)
+    else
+        println("Only implemented REML at this time")
+    end
+
+    println("σ_z : $(HMM.sigma[1])")
+    println("σ : $(HMM.sigma[2])")
+    println("β_M : $(HMM.betaM)")
+    println("β_X : $(HMM.betaX)")
+    
+end
+
+
+
+
+
+
+
+
+
+
+
 
 
